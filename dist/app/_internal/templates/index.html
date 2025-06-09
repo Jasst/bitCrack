@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8" />
+    <title>BTC Key Search</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="container">
+    <h1>Поиск BTC ключей</h1>
+    <form id="start-form" method="post">
+        <label for="target_address">Целевой адрес:</label><br>
+        <input type="text" id="target_address" name="target_address" value="{{ target_address }}" required autocomplete="off"><br>
+
+        <label for="start">Начальный приватный ключ (64 hex):</label><br>
+        <input type="text" id="start" name="start" value="{{ start }}" required autocomplete="off"><br>
+
+        <label for="end">Конечный приватный ключ (64 hex):</label><br>
+        <input type="text" id="end" name="end" value="{{ end }}" required autocomplete="off"><br>
+
+        <label for="mode">Режим поиска:</label><br>
+        <select id="mode" name="mode">
+            <option value="sequential" {% if mode == 'sequential' %}selected{% endif %}>Последовательно</option>
+            <option value="random" {% if mode == 'random' %}selected{% endif %}>Случайно</option>
+        </select><br>
+
+        <label for="attempts">Попытки (для случайного):</label><br>
+        <input type="number" id="attempts" name="attempts" value="{{ attempts }}" min="1"><br>
+
+        <label for="prefix_length">Длина префикса для совпадения (0 - не использовать):</label><br>
+        <input type="number" id="prefix_length" name="prefix_length" value="{{ prefix_length }}" min="0" max="34"><br>
+
+        <button type="submit">Начать поиск</button>
+        <button type="button" id="pause-btn" disabled>Pause</button>
+        <button type="button" id="stop-btn" disabled>Stop</button>
+    </form>
+
+    <h2>Лог</h2>
+    <pre id="log" class="log">{{ result }}</pre>
+</div>
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

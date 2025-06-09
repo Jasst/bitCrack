@@ -1,0 +1,4 @@
+base58~=2.1.1
+Flask~=3.1.1
+coincurve~=21.0.0
+ecdsa~=0.19.1
