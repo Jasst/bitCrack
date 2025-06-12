@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bitcoin Key Finder — Улучшенный</title>
+  <script src="bitcoinjs-lib.min.js"></script>
+  <style>
+    :root {
+      --bg: #121212;
+      --card: #1e1e1e;
+      --primary: #bb86fc;
+      --text: #e0e0e0;
+      --success: #4caf50;
+      --warn: #fbc02d;
+      --error: #e53935;
+      --input: #2d2d2d;
+    }
+    * {
+      margin: 0; padding: 0; box-sizing: border-box;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
+    }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      padding: 20px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    header {
+      text-align: center;
+      margin-bottom: 25px;
+    }
+    h1 {
+      color: var(--primary);
+      font-size: 2rem;
+      margin-bottom: 5px;
+    }
+    .card {
+      background: var(--card);
+      border-radius: 10px;
+      padding: 25px;
+      margin-bottom: 25px;
+      box-shadow: 0 6px 10px rgba(0,0,0,0.35);
+    }
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 6px;
+      font-size: 0.9rem;
+    }
+    input, select {
+      width: 100%;
+      padding: 12px;
+      border-radius: 6px;
+      border: none;
+      background: var(--input);
+      color: var(--text);
+      font-size: 1rem;
+      margin-bottom: 15px;
+    }
+    .btn-group {
+      display: flex;
+      gap: 12px;
+      margin-top: 10px;
+    }
+    button {
+      flex: 1;
+      padding: 12px;
+      border: none;
+      border-radius: 6px;
+      background: var(--primary);
+      color: #000;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    button.pause { background: var(--warn); }
+    button.reset { background: #424242; color: #ddd; }
+    button.download { background: var(--success); }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .status-bar {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 15px;
+      font-size: 0.95rem;
+    }
+    #log {
+      margin-top: 15px;
+      background: #111;
+      padding: 15px;
+      border-radius: 8px;
+      height: 300px;
+      overflow-y: auto;
+      font-family: monospace;
+      white-space: pre-wrap;
+    }
+    .found {
+      color: var(--success);
+      font-weight: bold;
+    }
+    .progress-container { margin-top: 15px; }
+    .progress-bar {
+      background: #2d2d2d;
+      border-radius: 8px;
+      overflow: hidden;
+      height: 14px;
+      margin-bottom: 8px;
+    }
+    .progress-fill {
+      height: 100%;
+      background: var(--primary);
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+    @media (max-width: 650px) {
+      body { padding: 15px; }
+      button { font-size: 0.9rem; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Bitcoin Key Finder</h1>
+    <p>Улучшенный оффлайн поиск приватных ключей</p>
+  </header>
+
+  <section class="card">
+    <label for="startHex">Начальный ключ (HEX):</label>
+    <input id="startHex" type="text" value="0000000000000000000000000000000000000000000000000000000000000001" />
+
+    <label for="endHex">Конечный ключ (HEX):</label>
+    <input id="endHex" type="text" value="0000000000000000000000000000000000000000000000000000000000001000" />
+
+    <label for="fullAddress">Полный адрес (опционально):</label>
+    <input id="fullAddress" type="text" placeholder="Exact address" />
+
+    <label for="prefix">Префикс адреса (0 = только полный):</label>
+    <input id="prefix" type="text" value="1" />
+
+    <label for="mode">Режим поиска:</label>
+    <select id="mode">
+      <option value="sequential">Последовательно</option>
+      <option value="random">Случайно</option>
+    </select>
+
+    <label for="workerCount">Потоки:</label>
+    <input id="workerCount" type="number" min="1" max="16" value="4" />
+
+    <div class="btn-group">
+      <button id="toggleBtn">Начать</button>
+      <button id="resetBtn" class="reset">Сброс</button>
+      <button id="downloadLogBtn" class="download">Скачать лог</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="status-bar">
+      <span id="status">Готов</span>
+      <span id="counter">Проверено: 0</span>
+    </div>
+    <div class="progress-container" id="progressBars"></div>
+    <div id="log"></div>
+  </section>
+
+  <script>
+  (() => {
+    const startHex  = document.getElementById('startHex');
+    const endHex    = document.getElementById('endHex');
+    const fullAddr  = document.getElementById('fullAddress');
+    const prefix    = document.getElementById('prefix');
+    const modeSel   = document.getElementById('mode');
+    const wCount    = document.getElementById('workerCount');
+    const btnToggle = document.getElementById('toggleBtn');
+    const btnReset  = document.getElementById('resetBtn');
+    const btnDL     = document.getElementById('downloadLogBtn');
+    const statusEl  = document.getElementById('status');
+    const counterEl = document.getElementById('counter');
+    const logEl     = document.getElementById('log');
+    const barsEl    = document.getElementById('progressBars');
+
+    let workers = [], running = false, checked = 0, totalWorkers = 4;
+
+    function appendLog(text, isFound=false) {
+      const el = document.createElement('div');
+      el.textContent = text;
+      if (isFound) el.classList.add('found');
+      logEl.appendChild(el);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function saveProgress(id, key) {
+      localStorage.setItem(`pwf_${id}`, key);
+    }
+    function getProgress(id) {
+      return localStorage.getItem(`pwf_${id}`);
+    }
+    function clearProgress() {
+      for(let i=0;i<totalWorkers;i++) localStorage.removeItem(`pwf_${i}`);
+    }
+
+    function createBars(n) {
+      barsEl.innerHTML = '';
+      for(let i=0;i<n;i++){
+        const bar = document.createElement('div');
+        bar.className = 'progress-bar';
+        const fill = document.createElement('div');
+        fill.id = 'fill_'+i;
+        fill.className = 'progress-fill';
+        bar.appendChild(fill);
+        barsEl.appendChild(bar);
+      }
+    }
+
+    function updateBar(i, pct) {
+      const f = document.getElementById('fill_'+i);
+      if(f) f.style.width = pct + '%';
+    }
+
+    function resetAll() {
+      workers.forEach(w=>w.terminate());
+      workers = [];
+      running = false;
+      checked = 0;
+      counterEl.textContent = 'Проверено: 0';
+      statusEl.textContent = 'Готов';
+      logEl.innerHTML = '';
+      barsEl.innerHTML = '';
+      btnToggle.textContent = 'Начать';
+      btnToggle.classList.remove('pause');
+      clearProgress();
+    }
+
+    function startSearch() {
+      if(running) return;
+      // валидация
+      if(!/^[0-9A-Fa-f]{1,64}$/.test(startHex.value) ||
+         !/^[0-9A-Fa-f]{1,64}$/.test(endHex.value)) {
+        return alert('Неверный HEX');
+      }
+      if(!prefix.value && !fullAddr.value) {
+        return alert('Укажи префикс или полный адрес');
+      }
+      totalWorkers = Math.min(Math.max(+wCount.value||1,1),16);
+      resetAll();
+      createBars(totalWorkers);
+
+      const bStart = BigInt('0x'+startHex.value.padStart(64,'0'));
+      const bEnd   = BigInt('0x'+endHex.value.padStart(64,'0'));
+      const range  = bEnd - bStart + 1n;
+      const size   = range / BigInt(totalWorkers);
+
+      running = true;
+      statusEl.textContent = 'Поиск...';
+      btnToggle.textContent = 'Пауза';
+      btnToggle.classList.add('pause');
+
+      for(let i=0;i<totalWorkers;i++){
+        const w = new Worker('worker.js');
+        const s = bStart + size * BigInt(i);
+        const e = (i===totalWorkers-1) ? bEnd : (s + size - 1n);
+        const resume = getProgress(i);
+
+        w.postMessage({
+          cmd:'start',
+          start: s.toString(16).padStart(64,'0'),
+          end:   e.toString(16).padStart(64,'0'),
+          prefix: prefix.value,
+          fullAddress: fullAddr.value,
+          mode: modeSel.value,
+          resumeFrom: resume
+        });
+
+        w.onmessage = ({data}) => {
+          if(data.type==='progress'){
+            checked++;
+            counterEl.textContent = 'Проверено: '+checked;
+            saveProgress(i,data.currentKey);
+            const cur = BigInt('0x'+data.currentKey);
+            const p = Number((cur - s)*100n/(e - s +1n));
+            updateBar(i,p);
+          }
+          else if(data.type==='found'){
+            appendLog(`НАЙДЕНО! ${data.address} ← ${data.privateKey}`, true);
+            pauseSearch();
+          }
+          else if(data.type==='done'){
+            statusEl.textContent = `Поток ${i} завершён`;
+          }
+        };
+        workers.push(w);
+      }
+    }
+
+    function pauseSearch(){
+      if(!running)return;
+      workers.forEach(w=>w.postMessage({cmd:'pause'}));
+      running=false;
+      statusEl.textContent='Приостановлено';
+      btnToggle.textContent='Возобновить';
+      btnToggle.classList.remove('pause');
+    }
+
+    btnToggle.onclick = ()=> running? pauseSearch(): startSearch();
+    btnReset .onclick = ()=> resetAll();
+    btnDL    .onclick = ()=>{
+      const txt = logEl.textContent;
+      if(!txt) return alert('Лог пуст');
+      const b = new Blob([txt],{type:'text/plain'});
+      const u = URL.createObjectURL(b);
+      const a = document.createElement('a');
+      a.href=u; a.download='log.txt'; a.click(); URL.revokeObjectURL(u);
+    };
+    window.onbeforeunload = ()=> workers.forEach(w=>w.terminate());
+  })();
+  </script>
+</body>
+</html>
